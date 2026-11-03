@@ -1,0 +1,301 @@
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import javax.swing.*;
+
+// --- Main Application Class (BankApp.java) ---
+// This is the Presentation Layer. It handles the GUI and user interaction.
+// It uses the DatabaseManager to perform all database operations.
+
+class BankApp extends JFrame implements ActionListener {
+    private DatabaseManager dbManager;
+    private JTextField acnoField, nameField, balanceField, mobileField, updateAcnoField, updateField, updateValueField;
+    private JTextArea displayArea;
+    private JButton openBtn, viewBtn, updateBtn, displayAllBtn, exitBtn;
+    private JComboBox<String> updateFieldCombo;
+
+    public BankApp() {
+        super("Bank Management System");
+        
+        // Connect to the database
+        try {
+            this.dbManager = new DatabaseManager();
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Failed to connect to the database. Exiting.", "Error", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+            System.exit(1);
+        }
+
+        // GUI Setup
+        setLayout(new BorderLayout(10, 10));
+        
+        // --- Input Panel ---
+        JPanel inputPanel = new JPanel(new GridLayout(6, 2, 5, 5));
+        inputPanel.setBorder(BorderFactory.createTitledBorder("Account Operations"));
+
+        inputPanel.add(new JLabel("Account Number (for View/Update):"));
+        acnoField = new JTextField(15);
+        inputPanel.add(acnoField);
+
+        inputPanel.add(new JLabel("Name (for Open):"));
+        nameField = new JTextField(15);
+        inputPanel.add(nameField);
+        
+        inputPanel.add(new JLabel("Balance (for Open):"));
+        balanceField = new JTextField(15);
+        inputPanel.add(balanceField);
+
+        inputPanel.add(new JLabel("Mobile Number (for Open):"));
+        mobileField = new JTextField(15);
+        inputPanel.add(mobileField);
+
+        // --- Update Panel ---
+        JPanel updatePanel = new JPanel(new GridLayout(3, 2, 5, 5));
+        updatePanel.setBorder(BorderFactory.createTitledBorder("Update Account Details"));
+        
+        updatePanel.add(new JLabel("Account Number:"));
+        updateAcnoField = new JTextField(15);
+        updatePanel.add(updateAcnoField);
+
+        updatePanel.add(new JLabel("Field to Update:"));
+        String[] fields = {"name", "balance", "mobile_number"};
+        updateFieldCombo = new JComboBox<>(fields);
+        updatePanel.add(updateFieldCombo);
+
+        updatePanel.add(new JLabel("New Value:"));
+        updateValueField = new JTextField(15);
+        updatePanel.add(updateValueField);
+
+        // --- Button Panel ---
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        openBtn = new JButton("Open Account");
+        viewBtn = new JButton("View Statement");
+        updateBtn = new JButton("Update Account");
+        displayAllBtn = new JButton("Display All Accounts");
+        exitBtn = new JButton("Exit");
+
+        openBtn.addActionListener(this);
+        viewBtn.addActionListener(this);
+        updateBtn.addActionListener(this);
+        displayAllBtn.addActionListener(this);
+        exitBtn.addActionListener(this);
+        
+        buttonPanel.add(openBtn);
+        buttonPanel.add(viewBtn);
+        buttonPanel.add(updateBtn);
+        buttonPanel.add(displayAllBtn);
+        buttonPanel.add(exitBtn);
+
+        // --- Display Area ---
+        displayArea = new JTextArea(10, 50);
+        displayArea.setEditable(false);
+        JScrollPane scrollPane = new JScrollPane(displayArea);
+        scrollPane.setBorder(BorderFactory.createTitledBorder("Results"));
+
+        // Add panels to frame
+        add(inputPanel, BorderLayout.WEST);
+        add(updatePanel, BorderLayout.EAST);
+        add(buttonPanel, BorderLayout.SOUTH);
+        add(scrollPane, BorderLayout.CENTER);
+
+        // Frame properties
+        setSize(1000, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setVisible(true);
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        String command = e.getActionCommand();
+        displayArea.setText(""); // Clear the display area
+        
+        try {
+            switch (command) {
+                case "Open Account":
+                    String name = nameField.getText();
+                    double balance = Double.parseDouble(balanceField.getText());
+                    String mobile = mobileField.getText();
+                    dbManager.openAccount(name, balance, mobile);
+                    JOptionPane.showMessageDialog(this, "Account opened successfully!");
+                    break;
+                case "View Statement":
+                    int acno = Integer.parseInt(acnoField.getText());
+                    Account account = dbManager.getAccount(acno);
+                    if (account != null) {
+                        displayArea.setText(account.toString());
+                    } else {
+                        displayArea.setText("Account not found.");
+                    }
+                    break;
+                case "Update Account":
+                    int updateAcno = Integer.parseInt(updateAcnoField.getText());
+                    String field = (String) updateFieldCombo.getSelectedItem();
+                    String newValue = updateValueField.getText();
+                    dbManager.updateAccount(updateAcno, field, newValue);
+                    JOptionPane.showMessageDialog(this, "Account updated successfully!");
+                    break;
+                case "Display All Accounts":
+                    List<Account> accounts = dbManager.getAllAccounts();
+                    if (accounts.isEmpty()) {
+                        displayArea.setText("No accounts found.");
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        for (Account a : accounts) {
+                            sb.append(a.toString()).append("\n-------------------------\n");
+                        }
+                        displayArea.setText(sb.toString());
+                    }
+                    break;
+                case "Exit":
+                    dbManager.closeConnection();
+                    System.exit(0);
+                    break;
+            }
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Invalid input. Please enter valid numbers.", "Input Error", JOptionPane.ERROR_MESSAGE);
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this, "Database error: " + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new BankApp());
+    }
+}
+
+// --- Service Layer Class (DatabaseManager.java) ---
+// This is the Business Logic Layer. It manages all JDBC interactions.
+
+class DatabaseManager {
+    private Connection connection;
+
+    public DatabaseManager() throws SQLException {
+        try {
+            Class.forName("oracle.jdbc.driver.OracleDriver");
+        } catch (ClassNotFoundException e) {
+            System.err.println("Oracle JDBC Driver not found.");
+            throw new SQLException("JDBC Driver not found.", e);
+        }
+        
+        // Establish the connection
+        String url = "jdbc:oracle:thin:@localhost:1521:xe";
+        String username = "your_username";
+        String password = "your_password";
+        this.connection = DriverManager.getConnection(url, username, password);
+    }
+
+    // Algorithm for Open New Account
+    public void openAccount(String name, double balance, String mobileNumber) throws SQLException {
+        String insertQuery = "INSERT INTO accounts (acno, name, balance, mobile_number) VALUES (acno_seq.NEXTVAL, ?, ?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(insertQuery)) {
+            pstmt.setString(1, name);
+            pstmt.setDouble(2, balance);
+            pstmt.setString(3, mobileNumber);
+            pstmt.executeUpdate();
+        }
+    }
+
+    // Algorithm for Get Account Details by acno
+    public Account getAccount(int acno) throws SQLException {
+        String selectQuery = "SELECT acno, name, balance, mobile_number FROM accounts WHERE acno = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(selectQuery)) {
+            pstmt.setInt(1, acno);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return new Account(
+                        rs.getInt("acno"),
+                        rs.getString("name"),
+                        rs.getDouble("balance"),
+                        rs.getString("mobile_number")
+                    );
+                }
+            }
+        }
+        return null;
+    }
+
+    // Algorithm for Update Account Details
+    public void updateAccount(int acno, String field, String newValue) throws SQLException {
+        String updateQuery = "UPDATE accounts SET " + field + " = ? WHERE acno = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(updateQuery)) {
+            // Determine the data type to set the value correctly
+            if (field.equals("balance")) {
+                pstmt.setDouble(1, Double.parseDouble(newValue));
+            } else {
+                pstmt.setString(1, newValue);
+            }
+            pstmt.setInt(2, acno);
+            pstmt.executeUpdate();
+        }
+    }
+
+    // Algorithm for Displaying All Accounts
+    public List<Account> getAllAccounts() throws SQLException {
+        List<Account> accounts = new ArrayList<>();
+        String selectAllQuery = "SELECT acno, name, balance, mobile_number FROM accounts";
+        try (PreparedStatement pstmt = connection.prepareStatement(selectAllQuery);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                accounts.add(new Account(
+                    rs.getInt("acno"),
+                    rs.getString("name"),
+                    rs.getDouble("balance"),
+                    rs.getString("mobile_number")
+                ));
+            }
+        }
+        return accounts;
+    }
+
+    // Close database connection
+    public void closeConnection() {
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException e) {
+                System.err.println("Error closing connection.");
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+// --- Data Model Class (Account.java) ---
+// This is the Data Transfer Object.
+
+class Account {
+    private int acno;
+    private String name;
+    private double balance;
+    private String mobileNumber;
+
+    public Account(int acno, String name, double balance, String mobileNumber) {
+        this.acno = acno;
+        this.name = name;
+        this.balance = balance;
+        this.mobileNumber = mobileNumber;
+    }
+    
+    // Getters
+    public int getAcno() { return acno; }
+    public String getName() { return name; }
+    public double getBalance() { return balance; }
+    public String getMobileNumber() { return mobileNumber; }
+    
+    @Override
+    public String toString() {
+        return "Account Number: " + acno + "\n" +
+               "Name: " + name + "\n" +
+               "Balance: " + String.format("%.2f", balance) + "\n" +
+               "Mobile Number: " + mobileNumber;
+    }
+}
+
