@@ -1,4 +1,4 @@
-# CSE Software systems Lab
+# SysForge Systems Lab
 
 Curated coursework implementations and supporting documents from Prakhar Sharma's CSE lab work.
 
